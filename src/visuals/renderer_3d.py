@@ -25,7 +25,7 @@ except ImportError:
 
 
 def _random_velocity():
-    return random.uniform(-0.35, 0.35)
+    return random.uniform(-0.012, 0.012)
 
 
 @dataclass(slots=True)
@@ -39,6 +39,14 @@ class Particle:
     r: float = 1.0
     g: float = 1.0
     b: float = 1.0
+    home_x: float = field(init=False)
+    home_y: float = field(init=False)
+    home_z: float = field(init=False)
+
+    def __post_init__(self):
+        self.home_x = self.x
+        self.home_y = self.y
+        self.home_z = self.z
 
 current_rotation = np.zeros(3, dtype=np.float32)
 target_rotation = np.zeros(3, dtype=np.float32)
@@ -48,6 +56,10 @@ scale_factor = 1.0
 animation_time = 0.0
 time_step = 0.08
 color_mode = "rainbow"
+velocity_jitter = 0.0025
+attraction_strength = 0.018
+velocity_damping = 0.94
+max_velocity = 0.05
 
 position_x = 0
 position_y = 0
@@ -104,6 +116,7 @@ def update_animation():
     global animation_time
 
     animation_time += time_step
+    _update_particle_motion()
     _animate_particle_colors()
 
 
@@ -183,6 +196,36 @@ def _transform_particles(size):
 
 def _update_current_rotation():
     current_rotation[:] += (target_rotation - current_rotation) * rotation_lerp_factor
+
+
+def _update_particle_motion():
+    for particle in particles:
+        particle.vx += random.uniform(-velocity_jitter, velocity_jitter)
+        particle.vy += random.uniform(-velocity_jitter, velocity_jitter)
+        particle.vz += random.uniform(-velocity_jitter, velocity_jitter)
+
+        particle.vx += (particle.home_x - particle.x) * attraction_strength
+        particle.vy += (particle.home_y - particle.y) * attraction_strength
+        particle.vz += (particle.home_z - particle.z) * attraction_strength
+
+        particle.vx *= velocity_damping
+        particle.vy *= velocity_damping
+        particle.vz *= velocity_damping
+
+        speed = math.sqrt(
+            (particle.vx * particle.vx)
+            + (particle.vy * particle.vy)
+            + (particle.vz * particle.vz)
+        )
+        if speed > max_velocity:
+            speed_scale = max_velocity / speed
+            particle.vx *= speed_scale
+            particle.vy *= speed_scale
+            particle.vz *= speed_scale
+
+        particle.x += particle.vx
+        particle.y += particle.vy
+        particle.z += particle.vz
 
 
 def _animate_particle_colors():
@@ -365,6 +408,19 @@ def _draw_debug(frame):
         frame,
         f"Color: {color_mode}",
         (20, 130),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.65,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        frame,
+        (
+            "Motion: "
+            f"jitter {velocity_jitter:.4f} | attract {attraction_strength:.3f}"
+        ),
+        (20, 160),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.65,
         (255, 255, 255),
