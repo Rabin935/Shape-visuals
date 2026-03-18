@@ -30,10 +30,10 @@ class Particle:
     g: int = 255
     b: int = 255
 
-
-rotation_x = 0.0
-rotation_y = 0.0
-rotation_z = 0.0
+current_rotation = np.zeros(3, dtype=np.float32)
+target_rotation = np.zeros(3, dtype=np.float32)
+target_rotation_step = np.array([1.0, 1.0, 0.0], dtype=np.float32)
+rotation_lerp_factor = 0.1
 scale_factor = 1.0
 
 position_x = 0
@@ -67,20 +67,15 @@ generate_cube()
 
 
 def update_transform(gesture):
-    global rotation_x
-    global rotation_y
-    global rotation_z
+    global target_rotation
     global scale_factor
 
     if gesture == "point":
-        rotation_x += 1.0
-        rotation_y += 1.0
+        target_rotation[:] += target_rotation_step
     elif gesture == "peace":
         scale_factor = min(3.0, scale_factor + 0.02)
     elif gesture == "fist":
-        rotation_x = 0.0
-        rotation_y = 0.0
-        rotation_z = 0.0
+        target_rotation[:] = 0.0
         scale_factor = 1.0
     else:
         scale_factor = max(0.5, scale_factor - 0.01)
@@ -107,6 +102,7 @@ def draw(frame):
 
     viewport_width = frame.shape[1]
     viewport_height = frame.shape[0]
+    _update_current_rotation()
     center = np.array(
         [
             position_x if position_x else frame.shape[1] // 2,
@@ -126,6 +122,7 @@ def render_particles_opengl():
     if not OPENGL_AVAILABLE:
         raise RuntimeError("PyOpenGL is not available in this environment.")
 
+    _update_current_rotation()
     transformed_particles = _transform_particles(0.35 * scale_factor)
     offset_x, offset_y = _screen_to_opengl_offset()
 
@@ -156,10 +153,14 @@ def _transform_particles(size):
         dtype=np.float32,
     ) * size
 
-    rotated = _rotate_x(points, math.radians(rotation_x))
-    rotated = _rotate_y(rotated, math.radians(rotation_y))
-    rotated = _rotate_z(rotated, math.radians(rotation_z))
+    rotated = _rotate_x(points, math.radians(float(current_rotation[0])))
+    rotated = _rotate_y(rotated, math.radians(float(current_rotation[1])))
+    rotated = _rotate_z(rotated, math.radians(float(current_rotation[2])))
     return rotated
+
+
+def _update_current_rotation():
+    current_rotation[:] += (target_rotation - current_rotation) * rotation_lerp_factor
 
 
 def _project_particles(center):
@@ -233,8 +234,26 @@ def _draw_debug(frame):
     )
     cv2.putText(
         frame,
-        f"Rot: ({rotation_x:.0f}, {rotation_y:.0f}, {rotation_z:.0f})",
+        (
+            "Rot: "
+            f"({current_rotation[0]:.1f}, {current_rotation[1]:.1f}, "
+            f"{current_rotation[2]:.1f})"
+        ),
         (20, frame.shape[0] - 45),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.65,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        frame,
+        (
+            "Target: "
+            f"({target_rotation[0]:.1f}, {target_rotation[1]:.1f}, "
+            f"{target_rotation[2]:.1f})"
+        ),
+        (20, frame.shape[0] - 105),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.65,
         (255, 255, 255),
