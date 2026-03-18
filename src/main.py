@@ -17,6 +17,7 @@ while True:
 
     frame = cv2.flip(frame, 1)
     frame, hands = tracker.process(frame)
+    renderer_3d.update_animation()
 
     right_hand_gesture = None
 

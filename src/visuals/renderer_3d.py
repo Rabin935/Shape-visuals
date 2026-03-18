@@ -26,15 +26,17 @@ class Particle:
     vx: float = field(default_factory=_random_velocity)
     vy: float = field(default_factory=_random_velocity)
     vz: float = field(default_factory=_random_velocity)
-    r: int = 255
-    g: int = 255
-    b: int = 255
+    r: float = 1.0
+    g: float = 1.0
+    b: float = 1.0
 
 current_rotation = np.zeros(3, dtype=np.float32)
 target_rotation = np.zeros(3, dtype=np.float32)
 target_rotation_step = np.array([1.0, 1.0, 0.0], dtype=np.float32)
 rotation_lerp_factor = 0.1
 scale_factor = 1.0
+animation_time = 0.0
+time_step = 0.08
 
 position_x = 0
 position_y = 0
@@ -79,6 +81,13 @@ def update_transform(gesture):
         scale_factor = 1.0
     else:
         scale_factor = max(0.5, scale_factor - 0.01)
+
+
+def update_animation():
+    global animation_time
+
+    animation_time += time_step
+    _animate_particle_colors()
 
 
 def update_position(x, y, frame_width, frame_height):
@@ -130,11 +139,7 @@ def render_particles_opengl():
     glBegin(GL_POINTS)
 
     for particle, point in zip(particles, transformed_particles):
-        glColor3f(
-            particle.r / 255.0,
-            particle.g / 255.0,
-            particle.b / 255.0,
-        )
+        glColor3f(particle.r, particle.g, particle.b)
         glVertex3f(
             float(point[0] + offset_x),
             float(point[1] + offset_y),
@@ -163,6 +168,18 @@ def _update_current_rotation():
     current_rotation[:] += (target_rotation - current_rotation) * rotation_lerp_factor
 
 
+def _animate_particle_colors():
+    for particle in particles:
+        offset = (particle.x * 1.7) + (particle.y * 2.3) + (particle.z * 2.9)
+        particle.r = _normalized_sine(animation_time + offset)
+        particle.g = _normalized_sine(animation_time + offset + 2.0)
+        particle.b = _normalized_sine(animation_time + offset + 4.0)
+
+
+def _normalized_sine(value):
+    return (math.sin(value) + 1.0) * 0.5
+
+
 def _project_particles(center):
     if not particles:
         return []
@@ -185,7 +202,11 @@ def _project_particles(center):
                 int(y),
                 z,
                 radius,
-                (particle.b, particle.g, particle.r),
+                (
+                    int(particle.b * 255),
+                    int(particle.g * 255),
+                    int(particle.r * 255),
+                ),
             )
         )
 
@@ -274,6 +295,16 @@ def _draw_debug(frame):
         frame,
         f"OpenGL: {'ready' if OPENGL_AVAILABLE else 'unavailable'}",
         (20, 70),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.65,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        frame,
+        f"Time: {animation_time:.2f}",
+        (20, 100),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.65,
         (255, 255, 255),
