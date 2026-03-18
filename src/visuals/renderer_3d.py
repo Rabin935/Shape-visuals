@@ -5,6 +5,14 @@ import random
 import cv2
 import numpy as np
 
+try:
+    from OpenGL.GL import GL_POINTS, glBegin, glColor3f, glEnd, glPointSize, glVertex3f
+
+    OPENGL_AVAILABLE = True
+except ImportError:
+    GL_POINTS = None
+    OPENGL_AVAILABLE = False
+
 
 def _random_velocity():
     return random.uniform(-0.35, 0.35)
@@ -30,6 +38,8 @@ scale_factor = 1.0
 
 position_x = 0
 position_y = 0
+viewport_width = 1
+viewport_height = 1
 particle_spacing = 0.2
 particles: list[Particle] = []
 
@@ -79,15 +89,24 @@ def update_transform(gesture):
 def update_position(x, y, frame_width, frame_height):
     global position_x
     global position_y
+    global viewport_width
+    global viewport_height
 
     if frame_width <= 0 or frame_height <= 0:
         return
 
+    viewport_width = frame_width
+    viewport_height = frame_height
     position_x = int(np.clip(x, 0, frame_width - 1))
     position_y = int(np.clip(y, 0, frame_height - 1))
 
 
 def draw(frame):
+    global viewport_width
+    global viewport_height
+
+    viewport_width = frame.shape[1]
+    viewport_height = frame.shape[0]
     center = np.array(
         [
             position_x if position_x else frame.shape[1] // 2,
@@ -103,19 +122,51 @@ def draw(frame):
     return frame
 
 
-def _project_particles(center):
-    if not particles:
-        return []
+def render_particles_opengl():
+    if not OPENGL_AVAILABLE:
+        raise RuntimeError("PyOpenGL is not available in this environment.")
 
-    half_size = 45.0 * scale_factor
+    transformed_particles = _transform_particles(0.35 * scale_factor)
+    offset_x, offset_y = _screen_to_opengl_offset()
+
+    glPointSize(3)
+    glBegin(GL_POINTS)
+
+    for particle, point in zip(particles, transformed_particles):
+        glColor3f(
+            particle.r / 255.0,
+            particle.g / 255.0,
+            particle.b / 255.0,
+        )
+        glVertex3f(
+            float(point[0] + offset_x),
+            float(point[1] + offset_y),
+            float(point[2]),
+        )
+
+    glEnd()
+
+
+def _transform_particles(size):
+    if not particles:
+        return np.empty((0, 3), dtype=np.float32)
+
     points = np.array(
         [[particle.x, particle.y, particle.z] for particle in particles],
         dtype=np.float32,
-    ) * half_size
+    ) * size
 
     rotated = _rotate_x(points, math.radians(rotation_x))
     rotated = _rotate_y(rotated, math.radians(rotation_y))
     rotated = _rotate_z(rotated, math.radians(rotation_z))
+    return rotated
+
+
+def _project_particles(center):
+    if not particles:
+        return []
+
+    rotated = _transform_particles(45.0 * scale_factor)
 
     perspective = 320.0
     depth_offset = 260.0
@@ -139,6 +190,17 @@ def _project_particles(center):
 
     projected.sort(key=lambda point: point[2], reverse=True)
     return projected
+
+
+def _screen_to_opengl_offset():
+    if viewport_width <= 0 or viewport_height <= 0:
+        return 0.0, 0.0
+
+    center_x = position_x if position_x else viewport_width / 2
+    center_y = position_y if position_y else viewport_height / 2
+    offset_x = ((center_x / viewport_width) * 2.0 - 1.0) * 0.75
+    offset_y = (1.0 - (center_y / viewport_height) * 2.0) * 0.75
+    return float(offset_x), float(offset_y)
 
 
 def _draw_shadow(frame, center):
@@ -183,6 +245,16 @@ def _draw_debug(frame):
         frame,
         f"Scale: {scale_factor:.2f}",
         (20, frame.shape[0] - 15),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.65,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        frame,
+        f"OpenGL: {'ready' if OPENGL_AVAILABLE else 'unavailable'}",
+        (20, 70),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.65,
         (255, 255, 255),
