@@ -5,12 +5,22 @@ import random
 import cv2
 import numpy as np
 
+
+def _noop_gl(*_args, **_kwargs):
+    return None
+
+
 try:
     from OpenGL.GL import GL_POINTS, glBegin, glColor3f, glEnd, glPointSize, glVertex3f
 
     OPENGL_AVAILABLE = True
 except ImportError:
-    GL_POINTS = None
+    GL_POINTS = 0
+    glBegin = _noop_gl
+    glColor3f = _noop_gl
+    glEnd = _noop_gl
+    glPointSize = _noop_gl
+    glVertex3f = _noop_gl
     OPENGL_AVAILABLE = False
 
 
@@ -37,6 +47,7 @@ rotation_lerp_factor = 0.1
 scale_factor = 1.0
 animation_time = 0.0
 time_step = 0.08
+color_mode = "rainbow"
 
 position_x = 0
 position_y = 0
@@ -71,14 +82,20 @@ generate_cube()
 def update_transform(gesture):
     global target_rotation
     global scale_factor
+    global color_mode
 
     if gesture == "point":
         target_rotation[:] += target_rotation_step
+        color_mode = "blue"
     elif gesture == "peace":
         scale_factor = min(3.0, scale_factor + 0.02)
+        color_mode = "rainbow"
     elif gesture == "fist":
         target_rotation[:] = 0.0
         scale_factor = 1.0
+        color_mode = "white"
+    elif gesture == "open":
+        color_mode = "shift"
     else:
         scale_factor = max(0.5, scale_factor - 0.01)
 
@@ -169,11 +186,44 @@ def _update_current_rotation():
 
 
 def _animate_particle_colors():
+    if color_mode == "blue":
+        _set_solid_particle_color(0.2, 0.45, 1.0)
+        return
+
+    if color_mode == "white":
+        _set_solid_particle_color(1.0, 1.0, 1.0)
+        return
+
+    if color_mode == "shift":
+        _set_dynamic_shift_colors()
+        return
+
+    _set_rainbow_colors()
+
+
+def _set_solid_particle_color(r, g, b):
+    for particle in particles:
+        particle.r = r
+        particle.g = g
+        particle.b = b
+
+
+def _set_rainbow_colors():
     for particle in particles:
         offset = (particle.x * 1.7) + (particle.y * 2.3) + (particle.z * 2.9)
         particle.r = _normalized_sine(animation_time + offset)
         particle.g = _normalized_sine(animation_time + offset + 2.0)
         particle.b = _normalized_sine(animation_time + offset + 4.0)
+
+
+def _set_dynamic_shift_colors():
+    for particle in particles:
+        wave_x = animation_time * 1.4 + particle.x * 3.2
+        wave_y = animation_time * 1.1 + particle.y * 3.8
+        wave_z = animation_time * 1.7 + particle.z * 4.4
+        particle.r = _normalized_sine(wave_x + wave_z)
+        particle.g = _normalized_sine(wave_y + 2.0)
+        particle.b = _normalized_sine(wave_z - wave_x + 4.0)
 
 
 def _normalized_sine(value):
@@ -305,6 +355,16 @@ def _draw_debug(frame):
         frame,
         f"Time: {animation_time:.2f}",
         (20, 100),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.65,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        frame,
+        f"Color: {color_mode}",
+        (20, 130),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.65,
         (255, 255, 255),

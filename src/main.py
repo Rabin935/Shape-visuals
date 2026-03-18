@@ -17,7 +17,6 @@ while True:
 
     frame = cv2.flip(frame, 1)
     frame, hands = tracker.process(frame)
-    renderer_3d.update_animation()
 
     right_hand_gesture = None
 
@@ -48,6 +47,7 @@ while True:
             cv2.LINE_AA,
         )
 
+    renderer_3d.update_animation()
     frame = renderer_3d.draw(frame)
     cv2.imshow("Gesture Visualizer", frame)
 
