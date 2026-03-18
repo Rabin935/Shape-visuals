@@ -30,6 +30,30 @@ scale_factor = 1.0
 
 position_x = 0
 position_y = 0
+particle_spacing = 0.2
+particles: list[Particle] = []
+
+
+def generate_cube(spacing=0.2):
+    global particle_spacing
+    global particles
+
+    if spacing <= 0:
+        raise ValueError("spacing must be greater than 0")
+
+    particle_spacing = spacing
+    particles = []
+    stop = 1.0 + (spacing * 0.5)
+
+    for x in np.arange(-1.0, stop, spacing):
+        for y in np.arange(-1.0, stop, spacing):
+            for z in np.arange(-1.0, stop, spacing):
+                particles.append(Particle(float(x), float(y), float(z)))
+
+    return particles
+
+
+generate_cube()
 
 
 def update_transform(gesture):
@@ -72,30 +96,24 @@ def draw(frame):
         dtype=np.float32,
     )
 
-    cube_points = _project_cube(center)
+    projected_particles = _project_particles(center)
     _draw_shadow(frame, center)
-    _draw_cube(frame, cube_points)
+    _draw_particles(frame, projected_particles)
     _draw_debug(frame)
     return frame
 
 
-def _project_cube(center):
+def _project_particles(center):
+    if not particles:
+        return []
+
     half_size = 45.0 * scale_factor
-    vertices = np.array(
-        [
-            [-1, -1, -1],
-            [1, -1, -1],
-            [1, 1, -1],
-            [-1, 1, -1],
-            [-1, -1, 1],
-            [1, -1, 1],
-            [1, 1, 1],
-            [-1, 1, 1],
-        ],
+    points = np.array(
+        [[particle.x, particle.y, particle.z] for particle in particles],
         dtype=np.float32,
     ) * half_size
 
-    rotated = _rotate_x(vertices, math.radians(rotation_x))
+    rotated = _rotate_x(points, math.radians(rotation_x))
     rotated = _rotate_y(rotated, math.radians(rotation_y))
     rotated = _rotate_z(rotated, math.radians(rotation_z))
 
@@ -103,13 +121,23 @@ def _project_cube(center):
     depth_offset = 260.0
     projected = []
 
-    for point in rotated:
+    for particle, point in zip(particles, rotated):
         z = point[2] + depth_offset
         factor = perspective / z
         x = center[0] + point[0] * factor
         y = center[1] + point[1] * factor
-        projected.append((int(x), int(y), z))
+        radius = max(1, int(2.2 * factor))
+        projected.append(
+            (
+                int(x),
+                int(y),
+                z,
+                radius,
+                (particle.b, particle.g, particle.r),
+            )
+        )
 
+    projected.sort(key=lambda point: point[2], reverse=True)
     return projected
 
 
@@ -122,25 +150,25 @@ def _draw_shadow(frame, center):
     cv2.ellipse(frame, shadow_center, axes, 0, 0, 360, (25, 25, 25), -1)
 
 
-def _draw_cube(frame, points):
-    front = np.array([points[index][:2] for index in [0, 1, 2, 3]], dtype=np.int32)
-    back = np.array([points[index][:2] for index in [4, 5, 6, 7]], dtype=np.int32)
-    top = np.array([points[index][:2] for index in [0, 1, 5, 4]], dtype=np.int32)
-    side = np.array([points[index][:2] for index in [1, 2, 6, 5]], dtype=np.int32)
+def _draw_particles(frame, projected_particles):
+    frame_height, frame_width = frame.shape[:2]
 
-    cv2.fillConvexPoly(frame, back, (70, 110, 210))
-    cv2.fillConvexPoly(frame, top, (130, 190, 255))
-    cv2.fillConvexPoly(frame, side, (50, 80, 170))
-    cv2.fillConvexPoly(frame, front, (90, 150, 255))
-
-    cv2.polylines(frame, [front], True, (255, 255, 255), 2)
-    cv2.polylines(frame, [back], True, (190, 210, 255), 2)
-
-    for start, end in ((0, 4), (1, 5), (2, 6), (3, 7)):
-        cv2.line(frame, points[start][:2], points[end][:2], (220, 230, 255), 2)
+    for x, y, _z, radius, color in projected_particles:
+        if 0 <= x < frame_width and 0 <= y < frame_height:
+            cv2.circle(frame, (x, y), radius, color, -1, lineType=cv2.LINE_AA)
 
 
 def _draw_debug(frame):
+    cv2.putText(
+        frame,
+        f"Particles: {len(particles)} | Spacing: {particle_spacing:.2f}",
+        (20, frame.shape[0] - 75),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.65,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
     cv2.putText(
         frame,
         f"Rot: ({rotation_x:.0f}, {rotation_y:.0f}, {rotation_z:.0f})",
