@@ -77,6 +77,11 @@ viewport_width = 1
 viewport_height = 1
 particle_spacing = 0.2
 particles: list[Particle] = []
+trail_fade_factor = 0.86
+trail_blend_strength = 0.82
+trail_glow_radius = 3
+trail_buffer: np.ndarray | None = None
+trail_clear_buffer: np.ndarray | None = None
 
 
 def generate_cube(spacing=0.2):
@@ -188,7 +193,11 @@ def draw(frame):
     )
 
     projected_particles = _project_particles(center)
+    _ensure_trail_buffers(frame)
+    _fade_trail_buffer()
+    _draw_trail_particles(projected_particles)
     _draw_shadow(frame, center)
+    frame = _blend_trail_buffer(frame)
     _draw_particles(frame, projected_particles)
     _draw_debug(frame)
     return frame
@@ -441,6 +450,40 @@ def _screen_to_opengl_offset():
     return float(offset_x), float(offset_y)
 
 
+def _ensure_trail_buffers(frame):
+    global trail_buffer
+    global trail_clear_buffer
+
+    if trail_buffer is not None and trail_buffer.shape == frame.shape:
+        return
+
+    # Keep a dedicated particle layer so old positions can fade out gradually.
+    trail_buffer = np.zeros_like(frame)
+    trail_clear_buffer = np.zeros_like(frame)
+
+
+def _fade_trail_buffer():
+    global trail_buffer
+
+    if trail_buffer is None or trail_clear_buffer is None:
+        return
+
+    trail_buffer[:] = cv2.addWeighted(
+        trail_buffer,
+        trail_fade_factor,
+        trail_clear_buffer,
+        1.0 - trail_fade_factor,
+        0.0,
+    )
+
+
+def _blend_trail_buffer(frame):
+    if trail_buffer is None:
+        return frame
+
+    return cv2.addWeighted(frame, 1.0, trail_buffer, trail_blend_strength, 0.0)
+
+
 def _draw_shadow(frame, center):
     shadow_center = (int(center[0] + 28), int(center[1] + 62))
     axes = (
@@ -456,6 +499,33 @@ def _draw_particles(frame, projected_particles):
     for x, y, _z, radius, color in projected_particles:
         if 0 <= x < frame_width and 0 <= y < frame_height:
             cv2.circle(frame, (x, y), radius, color, -1, lineType=cv2.LINE_AA)
+
+
+def _draw_trail_particles(projected_particles):
+    if trail_buffer is None:
+        return
+
+    frame_height, frame_width = trail_buffer.shape[:2]
+
+    for x, y, _z, radius, color in projected_particles:
+        if 0 <= x < frame_width and 0 <= y < frame_height:
+            glow_color = tuple(min(255, int(channel * 0.45)) for channel in color)
+            cv2.circle(
+                trail_buffer,
+                (x, y),
+                radius + trail_glow_radius,
+                glow_color,
+                -1,
+                lineType=cv2.LINE_AA,
+            )
+            cv2.circle(
+                trail_buffer,
+                (x, y),
+                radius + 1,
+                color,
+                -1,
+                lineType=cv2.LINE_AA,
+            )
 
 
 def _draw_debug(frame):
@@ -557,6 +627,19 @@ def _draw_debug(frame):
             f"jitter {velocity_jitter:.4f} | attract {attraction_strength:.3f}"
         ),
         (20, 190),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.65,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        frame,
+        (
+            "Trails: "
+            f"fade {trail_fade_factor:.2f} | mix {trail_blend_strength:.2f}"
+        ),
+        (20, 220),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.65,
         (255, 255, 255),
