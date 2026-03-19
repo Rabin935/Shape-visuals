@@ -50,16 +50,26 @@ class Particle:
 
 current_rotation = np.zeros(3, dtype=np.float32)
 target_rotation = np.zeros(3, dtype=np.float32)
-target_rotation_step = np.array([1.0, 1.0, 0.0], dtype=np.float32)
+rotation_step = np.array([0.45, 0.7, 0.18], dtype=np.float32)
 rotation_lerp_factor = 0.1
+rotation_speed_multiplier = 0.35
+target_rotation_speed_multiplier = 0.35
+rotation_speed_lerp_factor = 0.14
 scale_factor = 1.0
+target_scale_factor = 1.0
+scale_lerp_factor = 0.12
 animation_time = 0.0
 time_step = 0.08
 color_mode = "rainbow"
+motion_mode = "orbit"
+active_gesture = "idle"
 velocity_jitter = 0.0025
 attraction_strength = 0.018
 velocity_damping = 0.94
 max_velocity = 0.05
+expand_distance_multiplier = 1.75
+free_float_boundary = 3.2
+free_float_pull_strength = 0.018
 
 position_x = 0
 position_y = 0
@@ -92,30 +102,57 @@ generate_cube()
 
 
 def update_transform(gesture):
-    global target_rotation
-    global scale_factor
+    global active_gesture
     global color_mode
+    global motion_mode
+    global target_rotation
+    global target_rotation_speed_multiplier
+    global target_scale_factor
+
+    gesture_changed = gesture != active_gesture
+    active_gesture = gesture
 
     if gesture == "point":
-        target_rotation[:] += target_rotation_step
+        target_rotation_speed_multiplier = 2.6
+        target_scale_factor = 1.0
+        motion_mode = "orbit"
         color_mode = "blue"
+        if gesture_changed:
+            target_rotation[:] += rotation_step * 14.0
     elif gesture == "peace":
-        scale_factor = min(3.0, scale_factor + 0.02)
+        target_rotation_speed_multiplier = 0.85
+        target_scale_factor = 1.15
+        motion_mode = "expand"
         color_mode = "rainbow"
+        if gesture_changed:
+            _apply_radial_impulse(0.035)
     elif gesture == "fist":
-        target_rotation[:] = 0.0
-        scale_factor = 1.0
+        target_rotation_speed_multiplier = 0.12
+        target_scale_factor = 0.82
+        motion_mode = "collapse"
         color_mode = "white"
+        if gesture_changed:
+            _apply_radial_impulse(-0.05)
     elif gesture == "open":
+        target_rotation_speed_multiplier = 1.2
+        target_scale_factor = 1.05
+        motion_mode = "free"
         color_mode = "shift"
+        if gesture_changed:
+            _apply_random_impulse(0.03)
     else:
-        scale_factor = max(0.5, scale_factor - 0.01)
+        target_rotation_speed_multiplier = 0.35
+        target_scale_factor = 1.0
+        motion_mode = "orbit"
+        color_mode = "rainbow"
 
 
 def update_animation():
     global animation_time
 
     animation_time += time_step
+    _update_rotation_state()
+    _update_scale_factor()
     _update_particle_motion()
     _animate_particle_colors()
 
@@ -198,27 +235,76 @@ def _update_current_rotation():
     current_rotation[:] += (target_rotation - current_rotation) * rotation_lerp_factor
 
 
+def _update_rotation_state():
+    global rotation_speed_multiplier
+
+    rotation_speed_multiplier += (
+        target_rotation_speed_multiplier - rotation_speed_multiplier
+    ) * rotation_speed_lerp_factor
+    target_rotation[:] += rotation_step * rotation_speed_multiplier
+
+
+def _update_scale_factor():
+    global scale_factor
+
+    scale_factor += (target_scale_factor - scale_factor) * scale_lerp_factor
+
+
 def _update_particle_motion():
     for particle in particles:
-        particle.vx += random.uniform(-velocity_jitter, velocity_jitter)
-        particle.vy += random.uniform(-velocity_jitter, velocity_jitter)
-        particle.vz += random.uniform(-velocity_jitter, velocity_jitter)
+        jitter = velocity_jitter
+        attraction = attraction_strength
+        damping = velocity_damping
+        speed_limit = max_velocity
+        target_x = particle.home_x
+        target_y = particle.home_y
+        target_z = particle.home_z
 
-        particle.vx += (particle.home_x - particle.x) * attraction_strength
-        particle.vy += (particle.home_y - particle.y) * attraction_strength
-        particle.vz += (particle.home_z - particle.z) * attraction_strength
+        if motion_mode == "expand":
+            target_x = particle.home_x * expand_distance_multiplier
+            target_y = particle.home_y * expand_distance_multiplier
+            target_z = particle.home_z * expand_distance_multiplier
+            attraction *= 1.2
+            jitter *= 1.35
+            damping = 0.95
+            speed_limit *= 1.5
+        elif motion_mode == "collapse":
+            target_x = 0.0
+            target_y = 0.0
+            target_z = 0.0
+            attraction *= 2.4
+            jitter *= 0.6
+            damping = 0.9
+            speed_limit *= 1.25
+        elif motion_mode == "free":
+            attraction = 0.0
+            jitter *= 1.9
+            damping = 0.97
+            speed_limit *= 1.75
 
-        particle.vx *= velocity_damping
-        particle.vy *= velocity_damping
-        particle.vz *= velocity_damping
+        particle.vx += random.uniform(-jitter, jitter)
+        particle.vy += random.uniform(-jitter, jitter)
+        particle.vz += random.uniform(-jitter, jitter)
+
+        if attraction > 0.0:
+            particle.vx += (target_x - particle.x) * attraction
+            particle.vy += (target_y - particle.y) * attraction
+            particle.vz += (target_z - particle.z) * attraction
+
+        if motion_mode == "free":
+            _apply_free_float_boundary(particle)
+
+        particle.vx *= damping
+        particle.vy *= damping
+        particle.vz *= damping
 
         speed = math.sqrt(
             (particle.vx * particle.vx)
             + (particle.vy * particle.vy)
             + (particle.vz * particle.vz)
         )
-        if speed > max_velocity:
-            speed_scale = max_velocity / speed
+        if speed > speed_limit:
+            speed_scale = speed_limit / speed
             particle.vx *= speed_scale
             particle.vy *= speed_scale
             particle.vz *= speed_scale
@@ -226,6 +312,43 @@ def _update_particle_motion():
         particle.x += particle.vx
         particle.y += particle.vy
         particle.z += particle.vz
+
+
+def _apply_radial_impulse(strength):
+    for particle in particles:
+        distance = math.sqrt(
+            (particle.x * particle.x)
+            + (particle.y * particle.y)
+            + (particle.z * particle.z)
+        )
+        if distance == 0.0:
+            continue
+
+        particle.vx += (particle.x / distance) * strength
+        particle.vy += (particle.y / distance) * strength
+        particle.vz += (particle.z / distance) * strength
+
+
+def _apply_random_impulse(strength):
+    for particle in particles:
+        particle.vx += random.uniform(-strength, strength)
+        particle.vy += random.uniform(-strength, strength)
+        particle.vz += random.uniform(-strength, strength)
+
+
+def _apply_free_float_boundary(particle):
+    distance = math.sqrt(
+        (particle.x * particle.x)
+        + (particle.y * particle.y)
+        + (particle.z * particle.z)
+    )
+    if distance <= free_float_boundary or distance == 0.0:
+        return
+
+    pull_strength = (distance - free_float_boundary) * free_float_pull_strength
+    particle.vx -= (particle.x / distance) * pull_strength
+    particle.vy -= (particle.y / distance) * pull_strength
+    particle.vz -= (particle.z / distance) * pull_strength
 
 
 def _animate_particle_colors():
@@ -417,10 +540,23 @@ def _draw_debug(frame):
     cv2.putText(
         frame,
         (
+            "Effect: "
+            f"{motion_mode} | Spin: {rotation_speed_multiplier:.2f}x"
+        ),
+        (20, 160),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.65,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        frame,
+        (
             "Motion: "
             f"jitter {velocity_jitter:.4f} | attract {attraction_strength:.3f}"
         ),
-        (20, 160),
+        (20, 190),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.65,
         (255, 255, 255),
