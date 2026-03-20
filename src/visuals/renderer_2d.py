@@ -12,7 +12,10 @@ class Renderer2D:
         elif gesture == "peace":
             self.shape = "circle"
         elif gesture == "open":
-            self.color = (255, 0, 0)
+            self.color = (230, 0, 0)
+
+
+
 
     def draw(self, frame, position):
         x, y = position
